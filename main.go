@@ -48,10 +48,6 @@ func main() {
     flag.Parse()
 
     rules := parseRules(fileName)
-    lastRule := rules[len(rules)-1]
-    rules = rules[:len(rules)-1]
-
-    isWhite := lastRule.Type == "white"
 
     fmt.Printf("Creating sockets\n")
     fd1, _ := createSocket(iface1Name)
@@ -61,8 +57,8 @@ func main() {
     defer unix.Close(fd2)
 
     fmt.Printf("Starting traffic\n")
-    go handleTraffic(fd1, fd2, rules, isWhite)
-    go handleTraffic(fd2, fd1, rules, isWhite)
+    go handleTraffic(fd1, fd2, rules)
+    go handleTraffic(fd2, fd1, rules)
 
     select {}
 }
@@ -119,9 +115,8 @@ func createSocket(ifaceName *string) (int, error) {
     return fd, nil
 }
 
-func handleTraffic(srcFd, dstFr int, rules []Rule, isWhite bool) {
+func handleTraffic(srcFd, dstFr int, rules []Rule) {
     for {
-        fmt.Printf("Reading packet from %s to %s\n", srcFd, dstFr)
         buf := make([]byte, 1024)
         n, _, err := unix.Recvfrom(srcFd, buf, 0)
         if err != nil {
@@ -129,7 +124,8 @@ func handleTraffic(srcFd, dstFr int, rules []Rule, isWhite bool) {
             continue
         }
 
-        if checkPacket(buf[:n], rules, isWhite) {
+        if checkPacket(buf[:n], rules) {
+            fmt.Printf("Packet skipped\n")
             _, err = unix.Write(dstFr, buf[:n])
             if err != nil {
                 fmt.Printf("Failed to send packet: %v\n", err)
@@ -140,7 +136,7 @@ func handleTraffic(srcFd, dstFr int, rules []Rule, isWhite bool) {
     }
 }
 
-func checkPacket(packet []byte, rules []Rule, isWhite bool) bool {
+func checkPacket(packet []byte, rules []Rule) bool {
     // 12-13 bytes is ethernet type
     ethType := binary.BigEndian.Uint16(packet[12:14])
 
@@ -151,52 +147,79 @@ func checkPacket(packet []byte, rules []Rule, isWhite bool) bool {
 
     // check IPV4 packet
     if ethType == IPV4 {
-        ipHeader := packet[14:34]
-        protocol := ipHeader[9]
-        ttl := uint16(ipHeader[8])
-
-        srcIP := net.IP(ipHeader[12:16])
-        dstIP := net.IP(ipHeader[16:20])
-
         for _, rule := range rules {
-            ruleProtocol := parseProtocol(&rule.Protocol)
-            if ttl > 0 && ttl > rule.TTL && !isWhite {
-                return isWhite
-            }
+            ruleType := rule.Type
 
-            if (ruleProtocol == 0 || ruleProtocol == protocol) &&
-                (rule.SrcIP == nil || rule.SrcIP.Equal(srcIP)) &&
-                (rule.DstIP == nil || rule.DstIP.Equal(dstIP)) &&
-                (ttl == 0 || ttl <= rule.TTL) {
-
-                if protocol == UDP {
-                    udpHeader := packet[34:42]
-                    srcPort := binary.BigEndian.Uint16(udpHeader[0:2])
-                    dstPort := binary.BigEndian.Uint16(udpHeader[2:4])
-
-                    if (rule.SrcPort == 0 || rule.SrcPort == srcPort) &&
-                        (rule.DstPort == 0 || rule.DstPort == dstPort) {
-                        return isWhite
-                    }
-                } else if protocol == TCP {
-                    tcpHeader := packet[34:54]
-                    srcPort := binary.BigEndian.Uint16(tcpHeader[0:2])
-                    dstPort := binary.BigEndian.Uint16(tcpHeader[2:4])
-
-                    if (rule.SrcPort == 0 || rule.SrcPort == srcPort) &&
-                        (rule.DstPort == 0 || rule.DstPort == dstPort) {
-                        return isWhite
-                    }
+            if ruleType == "delete" {
+                if checkIPV4(packet, rule) {
+                    return false
                 } else {
-                    return isWhite
+                    continue
+                }
+            } else if ruleType == "skip" {
+                if checkIPV4(packet, rule) {
+                    continue
+                } else {
+                    return false
                 }
             }
         }
-
-        return !isWhite
     }
 
     return true
+}
+
+func checkIPV4(packet []byte, rule Rule) bool {
+    ruleProtocol := parseProtocol(&rule.Protocol)
+
+    ipHeader := packet[14:34]
+    protocol := ipHeader[9]
+    ttl := uint16(ipHeader[8])
+
+    srcIP := net.IP(ipHeader[12:16])
+    dstIP := net.IP(ipHeader[16:20])
+
+    if (ruleProtocol == 0 || ruleProtocol == protocol) &&
+        (rule.SrcIP == nil || rule.SrcIP.Equal(srcIP)) &&
+        (rule.DstIP == nil || rule.DstIP.Equal(dstIP)) &&
+        (rule.TTL == 0 || rule.TTL >= ttl) {
+
+        if protocol == TCP {
+            return checkTCP(packet, rule)
+        } else if protocol == UDP {
+            return checkUDP(packet, rule)
+        } else {
+            return true
+        }
+    }
+
+    return false
+}
+
+func checkTCP(packet []byte, rule Rule) bool {
+    tcpHeader := packet[34:54]
+    srcPort := binary.BigEndian.Uint16(tcpHeader[0:2])
+    dstPort := binary.BigEndian.Uint16(tcpHeader[2:4])
+
+    if (rule.SrcPort == 0 || rule.SrcPort == srcPort) &&
+        (rule.DstPort == 0 || rule.DstPort == dstPort) {
+        return true
+    }
+
+    return false
+}
+
+func checkUDP(packet []byte, rule Rule) bool {
+    udpHeader := packet[34:42]
+    srcPort := binary.BigEndian.Uint16(udpHeader[0:2])
+    dstPort := binary.BigEndian.Uint16(udpHeader[2:4])
+
+    if (rule.SrcPort == 0 || rule.SrcPort == srcPort) &&
+        (rule.DstPort == 0 || rule.DstPort == dstPort) {
+        return true
+    }
+
+    return false
 }
 
 func htons(value uint16) uint16 {
