@@ -18,6 +18,8 @@ Example:
 
 Rules are stored in `rules.json` file. 
 
+Protocols ```ARP, STP, LLDP``` are always skipped.
+
 - This example file contains 2 rules, that delete ICMP packets between 2 hosts:
 ```json
 [

@@ -35,6 +35,7 @@ const IPV4 = 0x0800
 // skip protocols
 const ARP = 0x0806
 const STP = 0x0822
+const LLDP = 0x88cc
 
 const TCP = 0x06
 const UDP = 0x11
@@ -141,7 +142,7 @@ func checkPacket(packet []byte, rules []Rule) bool {
     ethType := binary.BigEndian.Uint16(packet[12:14])
 
     // skip arp packet
-    if ethType == ARP || ethType == STP {
+    if ethType == ARP || ethType == STP || ethType == LLDP {
         return true
     }
 
