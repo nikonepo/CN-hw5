@@ -1,0 +1,32 @@
+[
+  {
+    "Type": "delete",
+    "SrcIp": "10.1.0.1",
+    "DstIp": "10.1.0.2",
+    "Protocol": "icmp"
+  },
+  {
+    "Type": "delete",
+    "SrcIp": "10.1.0.2",
+    "DstIp": "10.1.0.1",
+    "Protocol": "icmp"
+  },
+  {
+    "Type": "delete",
+    "SrcIp": "10.1.0.1",
+    "SrcPort": 8080,
+    "DstIp": "10.1.0.2",
+    "DstPort": 8080,
+    "TTL": 50,
+    "Protocol": "tcp"
+  },
+  {
+    "Type": "delete",
+    "SrcIp": "10.1.0.2",
+    "SrcPort": 8080,
+    "DstIp": "10.1.0.1",
+    "DstPort": 8080,
+    "TTL": 50,
+    "Protocol": "tcp"
+  }
+]
