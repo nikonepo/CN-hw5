@@ -125,7 +125,7 @@ func handleTraffic(srcFd, dstFr int, rules []Rule) {
             continue
         }
 
-        if checkPacket(buf[:n], rules) {
+        if !checkPacket(buf[:n], rules) {
             fmt.Printf("Packet skipped\n")
             _, err = unix.Write(dstFr, buf[:n])
             if err != nil {
@@ -151,19 +151,11 @@ func checkPacket(packet []byte, rules []Rule) bool {
         for _, rule := range rules {
             ruleType := rule.Type
 
-            if ruleType == "delete" {
-                if checkIPV4(packet, rule) {
-                    return false
-                } else {
-                    continue
-                }
-            } else if ruleType == "skip" {
-                if checkIPV4(packet, rule) {
-                    continue
-                } else {
-                    return false
-                }
+            if checkIPV4(packet, rule) {
+                continue
             }
+
+            return ruleType == "delete"
         }
     }
 
@@ -180,21 +172,29 @@ func checkIPV4(packet []byte, rule Rule) bool {
     srcIP := net.IP(ipHeader[12:16])
     dstIP := net.IP(ipHeader[16:20])
 
-    if (ruleProtocol == 0 || ruleProtocol == protocol) &&
-        (rule.SrcIP == nil || rule.SrcIP.Equal(srcIP)) &&
-        (rule.DstIP == nil || rule.DstIP.Equal(dstIP)) &&
-        (rule.TTL == 0 || rule.TTL >= ttl) {
-
-        if protocol == TCP {
-            return checkTCP(packet, rule)
-        } else if protocol == UDP {
-            return checkUDP(packet, rule)
-        } else {
-            return true
-        }
+    if ruleProtocol != 0 && ruleProtocol != protocol {
+        return false
     }
 
-    return false
+    if rule.SrcIP != nil && !rule.SrcIP.Equal(srcIP) {
+        return false
+    }
+
+    if rule.DstIP != nil && !rule.DstIP.Equal(dstIP) {
+        return false
+    }
+
+    if rule.TTL != 0 && rule.TTL < ttl {
+        return false
+    }
+
+    if protocol == TCP {
+        return checkTCP(packet, rule)
+    } else if protocol == UDP {
+        return checkUDP(packet, rule)
+    } else {
+        return true
+    }
 }
 
 func checkTCP(packet []byte, rule Rule) bool {
@@ -202,12 +202,15 @@ func checkTCP(packet []byte, rule Rule) bool {
     srcPort := binary.BigEndian.Uint16(tcpHeader[0:2])
     dstPort := binary.BigEndian.Uint16(tcpHeader[2:4])
 
-    if (rule.SrcPort == 0 || rule.SrcPort == srcPort) &&
-        (rule.DstPort == 0 || rule.DstPort == dstPort) {
-        return true
+    if rule.SrcPort != 0 && rule.SrcPort != srcPort {
+        return false
     }
 
-    return false
+    if rule.DstPort != 0 && rule.DstPort != dstPort {
+        return false
+    }
+
+    return true
 }
 
 func checkUDP(packet []byte, rule Rule) bool {
@@ -215,12 +218,15 @@ func checkUDP(packet []byte, rule Rule) bool {
     srcPort := binary.BigEndian.Uint16(udpHeader[0:2])
     dstPort := binary.BigEndian.Uint16(udpHeader[2:4])
 
-    if (rule.SrcPort == 0 || rule.SrcPort == srcPort) &&
-        (rule.DstPort == 0 || rule.DstPort == dstPort) {
-        return true
+    if rule.SrcPort != 0 && rule.SrcPort != srcPort {
+        return false
     }
 
-    return false
+    if rule.DstPort != 0 && rule.DstPort != dstPort {
+        return false
+    }
+
+    return true
 }
 
 func htons(value uint16) uint16 {
